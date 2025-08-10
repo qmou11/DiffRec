@@ -1,0 +1,26 @@
+{
+  "comparison_time": "2025-08-10T16:08:57.513173",
+  "standard_result": {
+    "type": "standard",
+    "dataset": "ml-1m_clean",
+    "epochs": 20,
+    "batch_size": 400,
+    "duration": 39.2929949760437,
+    "exit_code": 0,
+    "log_file": "./log/ml-1m_clean/20250810_160736_standard_training.log"
+  },
+  "conditional_result": {
+    "type": "conditional",
+    "dataset": "ml-1m_clean",
+    "epochs": 20,
+    "batch_size": 400,
+    "duration": 41.61286973953247,
+    "exit_code": 0,
+    "log_file": "./log/ml-1m_clean/20250810_160815_conditional_training.log"
+  },
+  "analysis": {
+    "duration_difference": 2.3198747634887695,
+    "duration_percentage": 5.904041585282973,
+    "both_successful": true
+  }
+}

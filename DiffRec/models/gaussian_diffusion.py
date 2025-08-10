@@ -90,7 +90,7 @@ class GaussianDiffusion(nn.Module):
             / (1.0 - self.alphas_cumprod)
         )
     
-    def p_sample(self, model, x_start, steps, sampling_noise=False):
+    def p_sample(self, model, x_start, steps, sampling_noise=False, conditionals=None):
         assert steps <= self.steps, "Too much steps in inference."
         if steps == 0:
             x_t = x_start
@@ -103,12 +103,15 @@ class GaussianDiffusion(nn.Module):
         if self.noise_scale == 0.:
             for i in indices:
                 t = th.tensor([i] * x_t.shape[0]).to(x_start.device)
-                x_t = model(x_t, t)
+                if conditionals is not None:
+                    x_t = model(x_t, t, conditionals)
+                else:
+                    x_t = model(x_t, t)
             return x_t
 
         for i in indices:
             t = th.tensor([i] * x_t.shape[0]).to(x_start.device)
-            out = self.p_mean_variance(model, x_t, t)
+            out = self.p_mean_variance(model, x_t, t, conditionals)
             if sampling_noise:
                 noise = th.randn_like(x_t)
                 nonzero_mask = (
@@ -119,7 +122,7 @@ class GaussianDiffusion(nn.Module):
                 x_t = out["mean"]
         return x_t
     
-    def training_losses(self, model, x_start, reweight=False):
+    def training_losses(self, model, x_start, reweight=False, conditionals=None):
         batch_size, device = x_start.size(0), x_start.device
         ts, pt = self.sample_timesteps(batch_size, device, 'importance')
         noise = th.randn_like(x_start)
@@ -129,7 +132,11 @@ class GaussianDiffusion(nn.Module):
             x_t = x_start
 
         terms = {}
-        model_output = model(x_t, ts)
+        # Pass conditionals to the model if provided
+        if conditionals is not None:
+            model_output = model(x_t, ts, conditionals)
+        else:
+            model_output = model(x_t, ts)
         target = {
             ModelMeanType.START_X: x_start,
             ModelMeanType.EPSILON: noise,
@@ -151,6 +158,7 @@ class GaussianDiffusion(nn.Module):
                 loss = th.where((ts == 0), likelihood, mse)
         else:
             weight = th.tensor([1.0] * len(target)).to(device)
+            loss = mse
 
         terms["loss"] = weight * loss
         
@@ -231,14 +239,18 @@ class GaussianDiffusion(nn.Module):
         )
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
     
-    def p_mean_variance(self, model, x, t):
+    def p_mean_variance(self, model, x, t, conditionals=None):
         """
         Apply the model to get p(x_{t-1} | x_t), as well as a prediction of
         the initial x, x_0.
         """
         B, C = x.shape[:2]
         assert t.shape == (B, )
-        model_output = model(x, t)
+        # Pass conditionals to the model if provided
+        if conditionals is not None:
+            model_output = model(x, t, conditionals)
+        else:
+            model_output = model(x, t)
 
         model_variance = self.posterior_variance
         model_log_variance = self.posterior_log_variance_clipped

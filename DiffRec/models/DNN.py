@@ -6,31 +6,37 @@ import math
 
 class DNN(nn.Module):
     """
-    A deep neural network for the reverse diffusion preocess.
+    A deep neural network for the reverse diffusion process with conditional support.
     """
-    def __init__(self, in_dims, out_dims, emb_size, time_type="cat", norm=False, dropout=0.5):
+    def __init__(self, in_dims, out_dims, emb_size, time_type="cat", norm=True, dropout=0.5, use_conditionals=False, conditional_dim=2):
         super(DNN, self).__init__()
         self.in_dims = in_dims
         self.out_dims = out_dims
-        assert out_dims[0] == in_dims[-1], "In and out dimensions must equal to each other."
-        self.time_type = time_type
         self.time_emb_dim = emb_size
+        self.time_type = time_type
         self.norm = norm
-
+        self.use_conditionals = use_conditionals
+        self.conditional_dim = conditional_dim
+        
+        # Time embedding layer
         self.emb_layer = nn.Linear(self.time_emb_dim, self.time_emb_dim)
-
-        if self.time_type == "cat":
-            in_dims_temp = [self.in_dims[0] + self.time_emb_dim] + self.in_dims[1:]
-        else:
-            raise ValueError("Unimplemented timestep embedding type %s" % self.time_type)
-        out_dims_temp = self.out_dims
         
-        self.in_layers = nn.ModuleList([nn.Linear(d_in, d_out) \
-            for d_in, d_out in zip(in_dims_temp[:-1], in_dims_temp[1:])])
-        self.out_layers = nn.ModuleList([nn.Linear(d_in, d_out) \
-            for d_in, d_out in zip(out_dims_temp[:-1], out_dims_temp[1:])])
+        # Conditional embedding layer for user groups
+        if self.use_conditionals:
+            self.conditional_emb_layer = nn.Linear(self.conditional_dim, self.conditional_dim)
         
-        self.drop = nn.Dropout(dropout)
+        # Input layers
+        self.in_layers = nn.ModuleList()
+        self.in_layers.append(nn.Linear(self.in_dims[0] + self.time_emb_dim + (self.conditional_dim if self.use_conditionals else 0), self.in_dims[1]))
+        for i in range(1, len(self.in_dims) - 1):
+            self.in_layers.append(nn.Linear(self.in_dims[i], self.in_dims[i + 1]))
+        
+        # Output layers
+        self.out_layers = nn.ModuleList()
+        for i in range(len(self.out_dims) - 1):
+            self.out_layers.append(nn.Linear(self.out_dims[i], self.out_dims[i + 1]))
+        
+        self.drop = nn.Dropout(p=dropout)
         self.init_weights()
     
     def init_weights(self):
@@ -62,14 +68,33 @@ class DNN(nn.Module):
         std = np.sqrt(2.0 / (fan_in + fan_out))
         self.emb_layer.weight.data.normal_(0.0, std)
         self.emb_layer.bias.data.normal_(0.0, 0.001)
+        
+        # Initialize conditional embedding layer if used
+        if self.use_conditionals:
+            size = self.conditional_emb_layer.weight.size()
+            fan_out = size[0]
+            fan_in = size[1]
+            std = np.sqrt(2.0 / (fan_in + fan_out))
+            self.conditional_emb_layer.weight.data.normal_(0.0, std)
+            self.conditional_emb_layer.bias.data.normal_(0.0, 0.001)
     
-    def forward(self, x, timesteps):
+    def forward(self, x, timesteps, conditionals=None):
         time_emb = timestep_embedding(timesteps, self.time_emb_dim).to(x.device)
         emb = self.emb_layer(time_emb)
+        
         if self.norm:
             x = F.normalize(x)
         x = self.drop(x)
+        
+        # Concatenate input with time embedding
         h = torch.cat([x, emb], dim=-1)
+        
+        # Add conditionals if provided and enabled
+        if self.use_conditionals and conditionals is not None:
+            # Process conditionals through embedding layer
+            conditional_emb = self.conditional_emb_layer(conditionals)
+            h = torch.cat([h, conditional_emb], dim=-1)
+        
         for i, layer in enumerate(self.in_layers):
             h = layer(h)
             h = torch.tanh(h)
